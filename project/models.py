@@ -10,7 +10,7 @@ def PreyPredator(t:float, x:np.ndarray|list|Tuple[float, float], params:Tuple[fl
     return np.array([dx1, dx2])
 
 # Jacobian of prey predator evaluated at x(t)
-def PreyPredator_Jac(t:float, x:np.ndarray|list|Tuple[float, float], params:Tuple) -> np.ndarray:
+def PreyPredator_Jac(t:float, x:np.ndarray|list|Tuple[float, float], params:Tuple=(1, 0.8)) -> np.ndarray:
     x1, x2 = x
     a, b = params
     dx1x1 = a * (1 - x2) 
