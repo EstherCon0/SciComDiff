@@ -29,7 +29,7 @@ def VanDerPol(t:float, x:np.ndarray|list|Tuple[float, float], params:Tuple[float
     mu = params
     x1_ = x[1]
     x2_ = mu*(1-x[0]**2)*x[1]-x[0]
-    return np.array([x1_,x2_]).reshape(-1,1)
+    return np.array([x1_,x2_])
 
 def VanDerPol_Jac(t:float, x:np.ndarray|list|Tuple[float, float], params:Tuple[float]=(10)) -> np.ndarray:
     mu = params
@@ -79,7 +79,7 @@ def CSTR3(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, param
     # CSTR dynamics
     dCdt = (Cin - C_states) * F / V + R
 
-    return np.array(dCdt).reshape(-1,1)
+    return np.array(dCdt)
 
 def CSTR3_Jac(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, params:CSTR3_param_type=CSTR3_PARAMS) -> np.ndarray:
     deltaHr, rho, cp, Ea_over_R, k0, V, F, Cin = params
