@@ -77,14 +77,12 @@ def adaptive_dopri54(f:Callable, x0:np.ndarray | float, t0:float=0.0, t_end:floa
     print(f"Total of {iter_} iterations.")
     return np.array(times), np.array(results), np.array(err)
 
-def adaptive_rk45(f:Callable, x0:np.ndarray|float, t0:float=0.0, t_end:float=10.0, h:float=0.1, tol:float=1e-2, eps:float=0.9, *args) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def adaptive_rk45(f:Callable, x0:np.ndarray|float, t0:float=0.0, t_end:float=10.0, h:float=0.1, atol:float=1e-3, rtol:float=1e-2, safety:float=0.9, maxFactor:float=10, minFactor:float=0.2, *args) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     # Adaptive Runge-Kutta 4(5) / DOPRI(5)4
-    t = t0
+    t, p = t0, 4                                    # initial time-step t0, p order of method
     x = np.array(x0)
-    times = [t]
-    results = [x.copy()]
-    err = [tol]
-    iter_ = 1
+    times, results, err = [t], [x.copy()], [atol]   # storage lists
+    iter_, accepted = 1, False
 
     while t < t_end:
         if t + h > t_end:  # Adjust last step to reach exactly t_end
@@ -93,23 +91,28 @@ def adaptive_rk45(f:Callable, x0:np.ndarray|float, t0:float=0.0, t_end:float=10.
         x_next, err_est = dopri54_step(f, t, x, h)
 
         # Estimate the error and adjust step size
-        scale = np.maximum(np.abs(x), np.abs(x_next)) + tol
-        error_norm = np.linalg.norm(err_est / scale) / np.sqrt(len(x))
+        scale = np.maximum(np.abs(x), np.abs(x_next))*rtol + atol
+        error_norm = np.linalg.norm(err_est*h / scale) / np.sqrt(len(x))
         err.extend(err_est)
         
-        if error_norm <= 1.0:
+        # accept step
+        if error_norm < 1:
             t += h
             x = x_next
             times.append(t)
             results.append(x.copy())
+
+            if error_norm==0: factor = maxFactor
+            else: factor = min(maxFactor, safety*error_norm**(1/p+1))
             
-        # Increase step size for the next iteration
-        if error_norm > 0:  # Avoid division by zero
-            h *= min(5, max(0.8, eps * (1 / error_norm) ** 0.2))
+            if accepted==False: factor = min(1, factor)
+            h *= factor
+            accepted = True
         
+        # reject step
         else:
-            # Decrease step size and try again
-            h *= max(0.1, eps * (1 / error_norm) ** 0.25)
+            h *= max(minFactor, safety*error_norm**(1/p+1))
+            accepted = False
         
         iter_+=1
         if iter_%200==0: print(f"Iteration {iter_}, error_norm: {error_norm}")
