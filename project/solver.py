@@ -1,8 +1,8 @@
 import numpy as np
 from typing import Callable, Tuple
-from utils import StdMultivariateWienerProcess
+#from utils import StdMultivariateWienerProcess
 
-def dopri54_step(f:Callable, t:float, x:np.ndarray | float, h:float) -> Tuple[float, float]:
+def dopri54_step(f:Callable, t:float, x:np.ndarray | float, h:float=1e-2, *args) -> Tuple[float, float]:
 
     # Runge-Kutta Explicit Order 4
 
@@ -19,13 +19,13 @@ def dopri54_step(f:Callable, t:float, x:np.ndarray | float, h:float) -> Tuple[fl
     b1p, b2p, b3p, b4p, b5p, b6p, b7p = 5179/57600, 0, 7571/16695, 393/640, -92097/339200, 187/2100, 1/40
 
     # Calculate the stages
-    k1 = h * f(t, x)
-    k2 = h * f(t + c2*h, x + a21*k1)
-    k3 = h * f(t + c3*h, x + a31*k1 + a32*k2)
-    k4 = h * f(t + c4*h, x + a41*k1 + a42*k2 + a43*k3)
-    k5 = h * f(t + c5*h, x + a51*k1 + a52*k2 + a53*k3 + a54*k4)
-    k6 = h * f(t + c6*h, x + a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5)
-    k7 = h * f(t + c7*h, x + a71*k1 + a72*k2 + a73*k3 + a74*k4 + a75*k5 + a76*k6)
+    k1 = h * f(t, x, *args)
+    k2 = h * f(t + c2*h, x + a21*k1, *args)
+    k3 = h * f(t + c3*h, x + a31*k1 + a32*k2, *args)
+    k4 = h * f(t + c4*h, x + a41*k1 + a42*k2 + a43*k3, *args)
+    k5 = h * f(t + c5*h, x + a51*k1 + a52*k2 + a53*k3 + a54*k4, *args)
+    k6 = h * f(t + c6*h, x + a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5, *args)
+    k7 = h * f(t + c7*h, x + a71*k1 + a72*k2 + a73*k3 + a74*k4 + a75*k5 + a76*k6, *args)
 
     # Compute the next value
     x_next = x + b1*k1 + b2*k2 + b3*k3 + b4*k4 + b5*k5 + b6*k6 + b7*k7
@@ -35,7 +35,7 @@ def dopri54_step(f:Callable, t:float, x:np.ndarray | float, h:float) -> Tuple[fl
 
     return x_next, x_err
 
-def adaptive_dopri54(f:Callable, x0:np.ndarray | float, t0:float=0.0, t_end:float=10.0, h:float=0.1, eps:float=0.8, *args) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def adaptive_dopri54(f:Callable, x0:np.ndarray | float, t0:float=0.0, t_end:float=10.0, h:float=0.1, eps:float=0.8, max_iter:int=1e5, *args) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 
     # Adaptive Runge-Kutta 4(5) integration
     t = t0
@@ -47,10 +47,12 @@ def adaptive_dopri54(f:Callable, x0:np.ndarray | float, t0:float=0.0, t_end:floa
     k_p = 0.4/(p+1)
     k_i = 0.3/(p+1)
     r_acc = 1
+    iter_ = 1
 
     while t < t_end:
         if t + h > t_end:  # Adjust last step to reach exactly t_end
             h = t_end - t
+        if iter_>max_iter: raise AssertionError("Max iterations reached")
 
         x_next, err_est = dopri54_step(f, t, x, h, *args)
 
@@ -67,7 +69,50 @@ def adaptive_dopri54(f:Callable, x0:np.ndarray | float, t0:float=0.0, t_end:floa
             r_acc = r
         
         else:
-            h *= (eps/r)**(1/p)
+            h *= (eps/r)**(1/iter_)
+        
+        iter_+=1
+        if iter_%500==0: print(f"Iteration {iter_}, error_norm: {r}")
+
+    print(f"Total of {iter_} iterations.")
+    return np.array(times), np.array(results), np.array(err)
+
+def adaptive_rk45(f:Callable, x0:np.ndarray|float, t0:float=0.0, t_end:float=10.0, h:float=0.1, tol:float=1e-2, eps:float=0.9, *args) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    # Adaptive Runge-Kutta 4(5) / DOPRI(5)4
+    t = t0
+    x = np.array(x0)
+    times = [t]
+    results = [x.copy()]
+    err = [tol]
+    iter_ = 1
+
+    while t < t_end:
+        if t + h > t_end:  # Adjust last step to reach exactly t_end
+            h = t_end - t
+
+        x_next, err_est = dopri54_step(f, t, x, h)
+
+        # Estimate the error and adjust step size
+        scale = np.maximum(np.abs(x), np.abs(x_next)) + tol
+        error_norm = np.linalg.norm(err_est / scale) / np.sqrt(len(x))
+        err.extend(err_est)
+        
+        if error_norm <= 1.0:
+            t += h
+            x = x_next
+            times.append(t)
+            results.append(x.copy())
+            
+        # Increase step size for the next iteration
+        if error_norm > 0:  # Avoid division by zero
+            h *= min(5, max(0.8, eps * (1 / error_norm) ** 0.2))
+        
+        else:
+            # Decrease step size and try again
+            h *= max(0.1, eps * (1 / error_norm) ** 0.25)
+        
+        iter_+=1
+        if iter_%200==0: print(f"Iteration {iter_}, error_norm: {error_norm}")
 
     return np.array(times), np.array(results), np.array(err)
 

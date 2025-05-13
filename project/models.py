@@ -7,7 +7,7 @@ def PreyPredator(t:float, x:np.ndarray|list|Tuple[float, float], params:Tuple[fl
     x1, x2 = x
     dx1 = a * (1 - x2) * x1
     dx2 = -b * (1 - x1) * x2
-    return np.array([dx1, dx2]).reshape(-1,1)
+    return np.array([dx1, dx2])
 
 # Jacobian of prey predator evaluated at x(t)
 def PreyPredator_Jac(t:float, x:np.ndarray|list|Tuple[float, float], params:Tuple) -> np.ndarray:
@@ -105,7 +105,7 @@ def CSTR3_Jac(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, p
         [beta*k*CB,        beta*k*CA,    beta*(-dk_dT*CA*CB) + (-F/V)]
     ])
 
-def CSTR3_Jac(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, params:CSTR3_param_type=CSTR3_PARAMS) -> Tuple[np.ndarray, np.ndarray]:
+def CSTR3_Fun_Jac(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, params:CSTR3_param_type=CSTR3_PARAMS) -> Tuple[np.ndarray, np.ndarray]:
     return CSTR3(t, C_states, params), CSTR3_Jac(t, C_states, params)
 
 
@@ -164,3 +164,4 @@ def CSTR1_Fun_Jac(t:float, T_state:float, params:CSTR1_param_type=CSTR1_PARAMS) 
 
 
 ### PFR Plug-Flow-Reactor
+
