@@ -24,6 +24,25 @@ def PreyPredator_Fun_Jac(t:float, x:float|np.ndarray|list, params:Tuple[float, f
     return PreyPredator(t, x, params), PreyPredator_Jac(t, x, params)
 
 
+### Lotka Volterra - basically Predator Prey with 4 parameters
+y0 = [10.0, 5.0] # predator and prey concentration
+def LotkaVolterra(t:float, y:np.ndarray|list=y0, params:Tuple[float,float,float,float]=(1.1, 0.4, 0.1, 0.4)):
+    alpha, beta, delta, gamma = params
+    x, y_ = y
+    return np.array([
+        alpha * x - beta * x * y_,
+        delta * x * y_ - gamma * y_
+    ])
+
+def LotkaVolterra_Jac(t:float, y:np.ndarray|list=y0, params:Tuple[float,float,float,float]=(1.1, 0.4, 0.1, 0.4)):
+    alpha, beta, delta, gamma = params
+    x, y_ = y
+    return np.array([
+        [alpha - beta * y_, -beta * x],
+        [delta * y_, delta * x - gamma]
+    ])
+
+
 # Van Der Pol Oscillator function
 def VanDerPol(t:float, x:np.ndarray|list|Tuple[float, float], params:Tuple[float]=(10)) -> np.ndarray:
     mu = params
@@ -373,7 +392,6 @@ def Robertson_Jac(t:float, y:np.ndarray|list=y0, params:Tuple[float,float,float,
     ])
 
 
-
 ### Hovorka Glucose-Insulin Model
 
 # Model parameters (adjust as needed)
@@ -427,7 +445,7 @@ def Hovorka(t:float, y:np.ndarray|list, params:Tuple[float,float,float,float,flo
 
     return np.array([dGdt, dIdt, dGLdt, dGMdt, dGBdt, dLGLYdt, dMGLYdt, dBETAdt, dALPhadt, dISRdt])
 
-def Hovorka_Jac(t, y=y0, params:tuple=HOVORKA_PARAMS):
+def Hovorka_Jac(t:float, y:np.ndarray|list=y0, params:Tuple[float,float,float,float,float,float,float]=HOVORKA_PARAMS):
     """
     Analytical Jacobian of the simplified Hovorka model.
     
@@ -488,5 +506,132 @@ def Hovorka_Jac(t, y=y0, params:tuple=HOVORKA_PARAMS):
 
     ### dISRdt = ISR*(1 - ISR/100)
     J[9, 9] = (1 - 2 * ISR / 100)            # ∂(dISRdt)/∂ISR
+
+    return J
+
+# enhanced version of the Hovorka model; pancreatic feedback, saturation effects
+k_syn = 0.1     # Glycogen synthesis rate (h^-1)
+k_deg = 0.05    # Glycogen degradation rate (h^-1)
+Gb = 0.8        # Basal glucose (g/L)
+Ib = 0.3        # Basal insulin (mU/L)
+HOVORKA_PARAMS_ = BW, Kc, Km, Vm, tau_g, tau_i, tau_p, k_syn, k_deg, Gb, Ib
+
+def Hovorka_(t:float, y:np.ndarray|list=y0, params:Tuple[float,float,float,float,float,float,float,float,float,float,float]=HOVORKA_PARAMS_):
+    """
+    Enhanced Hovorka model with more physiological realism.
+
+    Args:
+        y: State vector of 10 variables:
+           [G, I, GL, GM, GB, LGLY, MGLY, BETA, ALPHA, ISR]
+        t: Time (unused).
+        BW: Body weight (kg)
+        Kc: Glucose conversion rate (kg/h)
+        Km: Michaelis constant for glucose transport (g/L)
+        Vm: Max glucose uptake rate (g/L/h)
+        tau_g: Glucose clearance rate (h^-1)
+        tau_i: Insulin clearance rate (h^-1)
+        tau_p: Beta cell production rate (h^-1)
+        k_syn: Glycogen synthesis rate (h^-1)
+        k_deg: Glycogen degradation rate (h^-1)
+        Gb: Basal glucose (g/L)
+        Ib: Basal insulin (mU/L)
+
+    Returns:
+        dydt: List of 10 derivatives.
+    """
+
+    # Unpack variables
+    G, I, GL, GM, GB, LGLY, MGLY, BETA, ALPHA, ISR = y
+    BW, Kc, Km, Vm, tau_g, tau_i, tau_p, k_syn, k_deg, Gb, Ib = params
+
+    # Michaelis-Menten terms for glucose uptake
+    def glucose_uptake(X): return Kc / (X + X * (X / Km))
+
+    # Pancreatic insulin secretion (Hill-type function)
+    ISR = Vm * (G**2 / (G**2 + Km**2)) * BETA
+
+    # Glucose dynamics (influenced by insulin-enhanced uptake)
+    U_id = Vm * I / (Km + I + 1e-8)  # insulin-dependent uptake
+    HGP = max(0, Gb - G) * (1 - I / (Ib + 1e-8))  # hepatic glucose production suppressed by insulin
+
+    dGdt = -tau_g * G - U_id + HGP + glucose_uptake(GL) + glucose_uptake(GM) + glucose_uptake(GB)
+    dIdt = -tau_i * I + ISR
+    dGLdt = -glucose_uptake(GL) + k_deg * LGLY
+    dGMdt = -glucose_uptake(GM) + k_deg * MGLY
+    dGBdt = -glucose_uptake(GB)  # brain glucose uptake is mostly insulin-independent
+
+    dLGLYdt = k_syn * GL - k_deg * LGLY
+    dMGLYdt = k_syn * GM - k_deg * MGLY
+
+    dBETAdt = tau_p * (G - Gb)  # Glucose stimulates β-cell growth
+    dALPHAdt = -tau_p * (G - Gb)  # Glucose suppresses α-cells
+    dISRdt = (ISR * (1 - ISR / 100))  # bounded ISR (simple model of saturation)
+
+    return np.array([dGdt, dIdt, dGLdt, dGMdt, dGBdt, dLGLYdt, dMGLYdt, dBETAdt, dALPHAdt, dISRdt])
+
+def Hovorka_Jac_(t:float, y:np.ndarray|list=y0, params:Tuple[float,float,float,float,float,float,float,float,float,float,float]=HOVORKA_PARAMS_):
+    BW, Kc, Km, Vm, tau_g, tau_i, tau_p, k_syn, k_deg, Gb, Ib = params
+    G, I, GL, GM, GB, LGLY, MGLY, BETA, ALPHA, ISR = y
+    J = np.zeros((10, 10))
+
+    # Helper functions
+    def dUptake_dX(X):  # Derivative of glucose uptake
+        denom = (X + X * (X / Km))
+        return -Kc * (1 + 2 * X / Km) / (denom ** 2)
+
+    def dU_id_dI(I):  # derivative of insulin-dependent uptake
+        return Vm * Km / (Km + I + 1e-8) ** 2
+
+    def dHGP_dG(G):  # ∂HGP/∂G
+        return -1 if G < Gb else 0
+
+    def dHGP_dI(I):  # ∂HGP/∂I
+        return -max(0, Gb - G) / (Ib + 1e-8)
+
+    # ISR = Vm * (G^2 / (G^2 + Km^2)) * BETA
+    dISR_dG = Vm * (2 * G * Km**2 * BETA) / (G**2 + Km**2)**2
+    dISR_dBETA = Vm * (G**2 / (G**2 + Km**2))
+
+    ### dG/dt
+    J[0, 0] = -tau_g - dHGP_dG(G)
+    J[0, 1] = -dU_id_dI(I) + dHGP_dI(I)
+    J[0, 2] = dUptake_dX(GL)
+    J[0, 3] = dUptake_dX(GM)
+    J[0, 4] = dUptake_dX(GB)
+
+    ### dI/dt
+    J[1, 0] = dISR_dG
+    J[1, 7] = dISR_dBETA
+    J[1, 1] = -tau_i
+
+    ### dGL/dt
+    J[2, 2] = -dUptake_dX(GL)
+    J[2, 5] = k_deg
+
+    ### dGM/dt
+    J[3, 3] = -dUptake_dX(GM)
+    J[3, 6] = k_deg
+
+    ### dGB/dt
+    J[4, 4] = -dUptake_dX(GB)
+
+    ### dLGLYdt
+    J[5, 2] = k_syn
+    J[5, 5] = -k_deg
+
+    ### dMGLYdt
+    J[6, 3] = k_syn
+    J[6, 6] = -k_deg
+
+    ### dBETAdt
+    J[7, 0] = tau_p
+
+    ### dALPHAdt
+    J[8, 0] = -tau_p
+
+    ### dISRdt
+    J[9, 0] = dISR_dG * (1 - ISR / 100)
+    J[9, 7] = dISR_dBETA * (1 - ISR / 100)
+    J[9, 9] = 1 - 2 * ISR / 100
 
     return J
