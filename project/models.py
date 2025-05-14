@@ -72,7 +72,7 @@ V = 0.105                    # L (from Wahlgreen 2020)
 F = 0.1                      # L/s  (assumed constant flowrate, realistic)
 
 # initialisations
-C0 = np.array([1.4, 3.7, 200])          # Initial condition
+C0 = np.array([3.4, 3.7, 200])          # Initial condition
 Cin = C0 + np.array([0.03, -0.04, -10])     # Assume inlet concentration = initial for now
 
 CSTR3_PARAMS = (deltaHr, rho, cp, Ea_over_R, k0, V, F, Cin)
