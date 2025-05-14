@@ -119,36 +119,43 @@ class ESDIRK23:
         err = np.linalg.norm((y_new - y_hat) / (self.atol + self.rtol * np.abs(y_new)), ord=np.inf)
         return y_new, err
 
-    def integrate(self, f, t0, y0, tf, jac=None, params=None):
+    def integrate_adaptive(self, f, t0, y0, tf, jac=None, params=None):
         t_vals = [t0]
-        y_vals = [y0]
+        y_vals = [np.array(y0)]
         t, y, iter_ = t0, np.array(y0), 1
         h = self.h_init
 
         while t < tf:
-            # Adjust step to not overshoot
             h = min(h, tf - t)
 
-            y_new, err = self.step(f, t, y, jac=jac, params=params, h=h)
+            try:
+                y_new, err = self.step(f, t, y, jac=jac, params=params, h=h)
+            except Exception as e:
+                raise RuntimeError(f"Step failed at t={t} with h={h}: {e}")
 
             if err <= 1:
-                # Accept step
                 t += h
                 y = y_new
                 t_vals.append(t)
                 y_vals.append(y.copy())
 
-                # Adapt step size
-                h = min(self.h_max, h * min(5.0, 0.9 * (1 / err)**0.2)) if err > 0 else self.h_max
+                # Adapt step size aggressively if error is small
+                if err == 0:
+                    h_new = h * 2.0
+                else:
+                    h_new = h * min(5.0, max(1.5, 0.9 * (1 / err)**0.3))
+
+                h = min(self.h_max, h_new)
             else:
-                # Reject step
+                # Reject step and shrink
                 h = max(self.h_min, h * max(0.1, 0.9 * (1 / err)**0.25))
 
-            # Ensure progress to avoid infinite loop
+            # Guard against vanishing h
             if h < 1e-12:
-                raise RuntimeError("Step size became too small — integration may be stuck.")
+                raise RuntimeError("Step size too small — integration may be stuck.")
+
             iter_+=1
             if iter_%500==0: print(f"Iteration {iter_}, err: {err}, h: {h}")
-
         return np.array(t_vals), np.array(y_vals)
+
 
