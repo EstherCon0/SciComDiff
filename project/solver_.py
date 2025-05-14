@@ -1,5 +1,6 @@
 import numpy as np
-import json
+import json, os
+from datetime import datetime
 
 class DOPRI54:
     def __init__(self, rtol=1e-6, atol=1e-9, h_init=0.01, h_min=1e-6, h_max=1.0):
@@ -62,6 +63,7 @@ class DOPRI54:
 
         return np.array(t_vals), np.array(y_vals)
 
+
 class ESDIRK23:
     def __init__(self, gamma:float=(1-(1/2**0.5)), rtol=1e-6, atol=1e-9, h_init=1e-2, h_min=1e-6, h_max=1.0, max_iter=10, tol=1e-8):
         self.gamma = gamma
@@ -72,7 +74,7 @@ class ESDIRK23:
         self.h_max = h_max
         self.max_iter = max_iter
         self.tol = tol
-        self.info = {'JacDir_ki_diff':[], 'ESDIRK_k': [], 't':[], 'step_evals':0, 'accepted_iter':0, 'rejected_iter':0, 'h_step_width':[], 'rel_err_norm':[], 'iter':[]}
+        self.info = {'JacDir_ki_diff':[], 'ESDIRK_k': [], 't':[], 'step_evals':0, 'accepted_iter':0, 'rejected_iter':0, 'h_step_width':[], 'rel_err_norm':[self.rtol], 'iter':[]}
 
         # ESDIRK23 constant properties
         self.p = 2      # integrated order
@@ -112,6 +114,8 @@ class ESDIRK23:
                     J = jac(ti, yi + h * self.A[i][i] * ki, *params) if params else jac(ti, yi + h * self.A[i][i] * ki)
                     I = np.eye(len(y))
                     res = ki - g
+                    #print("res:", res, "J", J, "ki", ki, "g", g)
+                    #print('solve matrix:', I - h * self.A[i][i] * J)
                     dki = np.linalg.solve(I - h * self.A[i][i] * J, res)
                     ki_new = ki - dki
                 else:
@@ -124,15 +128,16 @@ class ESDIRK23:
                 ki = ki_new
             
             k[i] = ki
-            self.info['ESDIRK_k'].append(ki)
+            self.info['ESDIRK_k'].append(ki.tolist())
 
         y_new = y + h * sum(self.b[i] * k[i] for i in range(s))
         y_hat = y + h * sum(self.b_hat[i] * k[i] for i in range(s))
         err = np.linalg.norm((y_new - y_hat) / (self.atol + self.rtol * np.abs(y_new)), ord=np.inf)
         return y_new, err
 
-    def integrate_adaptive(self, f, t0, y0, tf, jac=None, params=None):
-        t_vals = [t0]
+    def integrate_adaptive(self, f, t0, y0, tf, jac=None, params=None, verbose=False, save_traces:bool=False, save_trace_path:str="./project/traces"):
+        self.info['t'].append(t0)
+        save_path = os.path.join(save_trace_path, 'ESDIRK23_adaptive_'+datetime.now().strftime('%d_%m_%Y__%H_%M_%S')+'.json')
         y_vals = [np.array(y0)]
         t, y, iter_ = t0, np.array(y0), 1
         h = self.h_init
@@ -142,40 +147,57 @@ class ESDIRK23:
             h = min(h, tf - t)
 
             try:
-                y_new, err = self.step(f, t, y, jac=jac, params=params, h=h)
+                y_new, err_norm_tol = self.step(f, t, y, jac=jac, params=params, h=h)
+                self.info['rel_err_norm'].append(err_norm_tol)
             except Exception as e:
                 raise RuntimeError(f"ESDIRK23 integration step failed at t={t} with h={h}: {e}")
 
             # accept step
-            if err <= 1:
+            if err_norm_tol <= 1:
                 self.info['accepted_iter'] += 1
                 t += h
                 y = y_new
-                t_vals.append(t)
+                self.info['t'].append(t)
                 y_vals.append(y.copy())
 
                 # Adapt step size aggressively if error is small
-                if err == 0:
+                if err_norm_tol == 0:
                     h_new = h * 2.0
                 else:
-                    h_new = h * min(5.0, max(1.5, 0.9 * (1 / err)**0.3))
+                    h_new = h * min(5.0, max(1.5, 0.9 * (1 / err_norm_tol)**0.3))
 
                 h = min(self.h_max, h_new)
             else:
                 # Reject step and shrink
                 self.info['rejected_iter'] += 1
-                h = max(self.h_min, h * max(0.1, 0.9 * (1 / err)**0.25))
+                h = max(self.h_min, h * max(0.1, 0.9 * (1 / err_norm_tol)**0.25))
 
             # Guard against vanishing h
             if h < 1e-12:
                 raise RuntimeError("Step size too small — integration may be stuck.")
 
             iter_+=1
-            if iter_%500==0: print(f"Iteration {iter_}, err: {err}, h: {h}")
-            if iter_%1000==0:
-                with open('./traces/ESDIRK_23_adaptive_v01.json', 'w') as fp:
+            if iter_%500==0 and verbose: print(f"Iteration {iter_}, err: {err_norm_tol}, h: {h}, t: {t}")
+            if iter_%1000==0 and save_traces:
+                with open(save_path, 'w') as fp:
                     json.dump(self.info, fp)
 
-        return np.array(t_vals), np.array(y_vals)
+        return np.array(y_vals), self.info
+    
+    def integrate_fixed(self, f, t0, y0, tf, h, jac=None, params=None, verbose:bool=False):
+        self.info['t'].append(t0)
+        y_vals = [np.array(y0)]
+        t, y, iter_ = t0, np.array(y0), 1
 
+        while t < tf:
+            h = min(h, tf - t)
+            self.info['h_step_width'].append(h)
+            y, err_norm  = self.step(f, t, y, jac=jac, params=params, h=h)
+            t += h
+            self.info['t'].append(t)
+            self.info['rel_err_norm'].append(err_norm)
+            y_vals.append(y.copy())
+            iter_+=1
+            if verbose: print(f'iteration: {iter_}')
 
+        return np.array(y_vals), self.info
