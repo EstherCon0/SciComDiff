@@ -136,3 +136,14 @@ def plot_RK_stability(A:np.ndarray, b:np.ndarray, err_vec:np.ndarray, method_nam
 
     fig.subplots_adjust(hspace=0.25)
     fig.colorbar(plt.imshow(absE.clip(max=1)), ax=ax1)
+
+# Problem with Jacobian based NewtonMethod: Singularity at Steady-State
+np.random.seed(42)
+def safe_initialization(Jac_Function, x, threshold=1e8):
+    for attempt in range(10):
+        # try pertubation
+        x0 = x + np.random.uniform(-0.01, 0.01, size=3)
+        cond_number = np.linalg.cond(Jac_Function(0, x0))
+        if cond_number < threshold:
+            return x0
+    raise ValueError("Jacobian remains ill-conditioned after 10 perturbation attempts.")

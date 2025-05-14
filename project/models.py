@@ -72,14 +72,18 @@ V = 0.105                    # L (from Wahlgreen 2020)
 F = 0.1                      # L/s  (assumed constant flowrate, realistic)
 
 # initialisations
-C0 = np.array([1.6/2, 2.4/2, 600])      # Initial condition
-Cin = np.array([1.6/2, 2.4/2, 600])      # Assume inlet concentration = initial for now
+C0 = np.array([1.4, 3.7, 200])          # Initial condition
+Cin = C0 + np.array([0.03, -0.04, -10])     # Assume inlet concentration = initial for now
 
 CSTR3_PARAMS = (deltaHr, rho, cp, Ea_over_R, k0, V, F, Cin)
 CSTR3_param_type = Tuple[float, float, float, float, float, float, float, np.ndarray]
 
 def CSTR3(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, params:CSTR3_param_type=CSTR3_PARAMS) -> np.ndarray:
     deltaHr, rho, cp, Ea_over_R, k0, V, F, Cin = params
+
+    # robustness
+    T = max(C_states[2], 1e-3)  # prevent underflow
+    T = max(T, 1e-3)            # add temperature lower bound to avoid 0 division error
 
     # State variables
     CA, CB, T = C_states
@@ -100,29 +104,52 @@ def CSTR3(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, param
 
     return np.array(dCdt)
 
-def CSTR3_Jac(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, params:CSTR3_param_type=CSTR3_PARAMS) -> np.ndarray:
+
+def CSTR3_Jac(t: float, C_states: np.ndarray|list=C0, params:CSTR3_param_type=CSTR3_PARAMS) -> np.ndarray:
     deltaHr, rho, cp, Ea_over_R, k0, V, F, Cin = params
 
     # State variables
     CA, CB, T = C_states
 
+    # Safety check (avoid division by zero or overflow)
+    if T < 1e-5:
+        raise ValueError("Temperature too low — possible singularity in Jacobian.")
+
     # Arrhenius law
-    k = k0 * np.exp(-Ea_over_R/T)
+    k = k0 * np.exp(-Ea_over_R / T)
     r = k * CA * CB
     beta = -deltaHr / (rho * cp)
 
-    # Stoichiometry
+    # Derivatives
+    dk_dT = (Ea_over_R / T**2) * k
+    dr_dCA = k * CB
+    dr_dCB = k * CA
+    #dr_dT  = -Ea_over_R / T**2 * r  # product rule: d(k CA CB)/dT
+    dr_dT = dk_dT * CA * CB
+
+    # Partial derivatives of R = v * r
     v = np.array([-1, -2, beta])
 
-    # Partial derivatives
-    dk_dT = (Ea_over_R / T**2) * k
+    # Construct Jacobian
+    J = np.empty((3, 3))
 
-    # return the Jacobian matrix
-    return np.array([
-        [-F/V - k*CB,      -k*CA,       -(dk_dT * CA * CB)],
-        [-F/V - 2*k*CB,    -F/V - 2*k*CA, -(2 * dk_dT * CA * CB)],
-        [beta*k*CB,        beta*k*CA,    beta*(-dk_dT*CA*CB) + (-F/V)]
-    ])
+    # d(CA)/dt
+    J[0, 0] = -F/V + v[0] * dr_dCA
+    J[0, 1] =        v[0] * dr_dCB
+    J[0, 2] =        v[0] * dr_dT
+
+    # d(CB)/dt
+    J[1, 0] =        v[1] * dr_dCA
+    J[1, 1] = -F/V + v[1] * dr_dCB
+    J[1, 2] =        v[1] * dr_dT
+
+    # d(T)/dt
+    J[2, 0] =        v[2] * dr_dCA
+    J[2, 1] =        v[2] * dr_dCB
+    J[2, 2] = -F/V + v[2] * dr_dT
+
+    return J
+
 
 def CSTR3_Fun_Jac(t:float, C_states:np.ndarray|list|Tuple[float, float, float]=C0, params:CSTR3_param_type=CSTR3_PARAMS) -> Tuple[np.ndarray, np.ndarray]:
     return CSTR3(t, C_states, params), CSTR3_Jac(t, C_states, params)
