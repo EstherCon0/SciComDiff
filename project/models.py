@@ -314,17 +314,179 @@ v_0 = B / (A - 1)
 y0 = [u_0, v_0]
 
 BRUSSELATOR_PARAMS = (A, B)
-def Brusselator(t:float, y:np.ndarray|list, params:Tuple[float, float]=BRUSSELATOR_PARAMS):
+def Brusselator(t:float, y:np.ndarray|list=y0, params:Tuple[float, float]=BRUSSELATOR_PARAMS):
     u, v = y
     A, B = params
     du_dt = A - (B + 1) * u + u**2 * v  # Rate of change for u
     dv_dt = B * u - u**2 * v             # Rate of change for v
     return np.array([du_dt, dv_dt])
 
-def Brusselator_Jac(t:float, y:np.ndarray|list, params:Tuple[float, float]=BRUSSELATOR_PARAMS):
+def Brusselator_Jac(t:float, y:np.ndarray|list=y0, params:Tuple[float, float]=BRUSSELATOR_PARAMS):
     u, v = y
     A, B = params
     return np.array([
         [A-(B+1)+2*u*v, u**2],
         [B-2*u*v, u**2]
     ])
+
+
+### Robertson Chemical Reaction
+# Initial Conditions
+k1, k2, k3, k4 = 0.1, 0.2, 0.3, 0.05
+ROBERTSON_PARAMS = k1, k2, k3, k4
+y0 = [1.0, 0.1, 0.1, 0.1]
+
+def Robertson(t:float, y:np.ndarray|list=y0, params:Tuple[float,float,float,float]=ROBERTSON_PARAMS):
+    """
+    Robertson chemical reaction model (Hovorka model).
+
+    Args:
+        y: A list or array containing the concentrations of the four species:
+           [A, B, C, D].
+        t: The current time.
+        k1: Rate constant for the first reaction (A -> 2B)
+        k2: Rate constant for the second reaction (2B -> C)
+        k3: Rate constant for the third reaction (C -> 2D)
+        k4: Rate constant for the fourth reaction (2D -> B)
+
+    Returns:
+        A list containing the derivatives of the concentrations [dA/dt, dB/dt, dC/dt, dD/dt].
+    """
+    k1, k2, k3, k4 = params
+    A, B, C, D = y
+
+    dadt = -k1 * A
+    dbdt = k1 * A - 2 * k2 * B + k4 * 2 * D
+    dcdt = 2 * k2 * B - k3 * C
+    dddt = k3 * C - k4 * 2 * D
+
+    return np.array([dadt, dbdt, dcdt, dddt])
+
+def Robertson_Jac(t:float, y:np.ndarray|list=y0, params:Tuple[float,float,float,float]=ROBERTSON_PARAMS):
+    k1, k2, k3, k4 = params
+    A, B, C, D = y
+    return np.array([
+        [-k1, 0, 0, 0],
+        [k1, -2*k2, 0, 2*k4],
+        [0, 2*k2, -k3, 0],
+        [0, 0, k3, -2*k4]
+    ])
+
+
+
+### Hovorka Glucose-Insulin Model
+
+# Model parameters (adjust as needed)
+BW = 70  # Body weight (kg)
+Kc = 0.01  # Glucose conversion rate (kg/h)
+Km = 0.5  # Michaelis constant (g/L)
+Vm = 0.1  # Maximum conversion rate (g/L/h)
+tau_g = 0.1  # Glucose appearance rate constant (h^-1)
+tau_i = 0.2  # Insulin clearance rate constant (h^-1)
+tau_p = 0.1  # Pancreas beta cell production constant (h^-1)
+HOVORKA_PARAMS = (BW, Kc, Km, Vm, tau_g, tau_i, tau_p)
+y0 = [5.0, 50.0, 1.0, 1.0, 1.0, 10.0, 10.0, 100.0, 10.0, 50.0]
+
+def Hovorka(t:float, y:np.ndarray|list, params:Tuple[float,float,float,float,float,float,float]=HOVORKA_PARAMS):
+    """
+    Hovorka model for glucose-insulin regulation.
+
+    Args:
+        y: A list or array containing the concentrations of the 10 variables:
+           [Glucose, Insulin, LiverGlucose, MuscleGlucose, BrainGlucose,
+            LiverGlycogen, MuscleGlycogen, PancreasBetaCell,
+            PancreasAlphaCell, InsulinSecretionRate].
+        t: The current time.
+        BW: Body weight (kg).
+        Kc: Glucose conversion rate (kg/h)
+        Km: Michaelis constant for glucose conversion (g/L)
+        Vm: Maximum conversion rate (g/L/h)
+        tau_g: Glucose appearance rate constant (h^-1)
+        tau_i: Insulin clearance rate constant (h^-1)
+        tau_p: Pancreas beta cell production constant (h^-1)
+
+    Returns:
+        A list containing the derivatives of the 10 variables [dGlucose/dt, dInsulin/dt, ...].
+    """
+
+    # Unpack variables
+    BW, Kc, Km, Vm, tau_g, tau_i, tau_p = params
+    G, I, GL, GM, GB, LGLY, MGLY, BETA, ALPHA, ISR = y
+
+    # Model equations
+    dGdt = -tau_g * G + (Kc / (GL + GL * (GL / Km)) + Kc / (GM + GM * (GM / Km)) + Kc / (GB + GB * (GB/ Km)))
+    dIdt = -tau_i * I + ISR
+    dGLdt = -GL + Kc / (GL + GL * (GL / Km))  # Simplified Liver glucose equation.  Adjust as needed.
+    dGMdt = -GM + Kc / (GM + GM * (GM / Km)) # Simplified Muscle glucose equation. Adjust as needed.
+    dGBdt = -GB + Kc / (GB + GB * (GB / Km)) # Simplified Brain glucose equation. Adjust as needed.
+    dLGLYdt = -LGLY
+    dMGLYdt = -MGLY
+    dBETAdt = ISR
+    dALPhadt = -ISR
+    dISRdt = ISR*(1-ISR/100) # Simplified Insulin secretion rate.  Adjust as needed.
+
+    return np.array([dGdt, dIdt, dGLdt, dGMdt, dGBdt, dLGLYdt, dMGLYdt, dBETAdt, dALPhadt, dISRdt])
+
+def Hovorka_Jac(t, y=y0, params:tuple=HOVORKA_PARAMS):
+    """
+    Analytical Jacobian of the simplified Hovorka model.
+    
+    Args:
+        y: State vector of length 10.
+        t: Time (unused, but included for compatibility).
+        BW, Kc, Km, Vm, tau_g, tau_i, tau_p: Model parameters.
+        
+    Returns:
+        J: 10x10 numpy array, the Jacobian matrix.
+    """
+    G, I, GL, GM, GB, LGLY, MGLY, BETA, ALPHA, ISR = y
+    BW, Kc, Km, Vm, tau_g, tau_i, tau_p = params
+    J = np.zeros((10, 10))
+
+    ### dGdt = -tau_g * G + f(GL, GM, GB)
+    # Partial derivatives of f(GL, GM, GB) w.r.t. GL, GM, GB
+    # Common derivative pattern for GL, GM, GB
+    def df_dX(X):  
+        denom = X + X * (X / Km)
+        return -Kc * (1 + 2 * X / Km) / (denom ** 2)
+
+    J[0, 0] = -tau_g                         # ∂(dGdt)/∂G
+    J[0, 2] = df_dX(GL)                      # ∂(dGdt)/∂GL
+    J[0, 3] = df_dX(GM)                      # ∂(dGdt)/∂GM
+    J[0, 4] = df_dX(GB)                      # ∂(dGdt)/∂GB
+
+    ### dIdt = -tau_i * I + ISR
+    J[1, 1] = -tau_i                         # ∂(dIdt)/∂I
+    J[1, 9] = 1                              # ∂(dIdt)/∂ISR
+
+    ### dGLdt = -GL + Kc / (GL + GL*(GL/Km))
+    denom_GL = GL + GL * (GL / Km)
+    dGL_rhs = -1 + df_dX(GL)
+    J[2, 2] = dGL_rhs                        # ∂(dGLdt)/∂GL
+
+    ### dGMdt = -GM + Kc / (GM + GM*(GM/Km))
+    denom_GM = GM + GM * (GM / Km)
+    dGM_rhs = -1 + df_dX(GM)
+    J[3, 3] = dGM_rhs                        # ∂(dGMdt)/∂GM
+
+    ### dGBdt = -GB + Kc / (GB + GB*(GB/Km))
+    denom_GB = GB + GB * (GB / Km)
+    dGB_rhs = -1 + df_dX(GB)
+    J[4, 4] = dGB_rhs                        # ∂(dGBdt)/∂GB
+
+    ### dLGLYdt = -LGLY
+    J[5, 5] = -1                             # ∂(dLGLYdt)/∂LGLY
+
+    ### dMGLYdt = -MGLY
+    J[6, 6] = -1                             # ∂(dMGLYdt)/∂MGLY
+
+    ### dBETAdt = ISR
+    J[7, 9] = 1                              # ∂(dBETAdt)/∂ISR
+
+    ### dALPHAdt = -ISR
+    J[8, 9] = -1                             # ∂(dALPHAdt)/∂ISR
+
+    ### dISRdt = ISR*(1 - ISR/100)
+    J[9, 9] = (1 - 2 * ISR / 100)            # ∂(dISRdt)/∂ISR
+
+    return J
