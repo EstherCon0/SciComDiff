@@ -1,4 +1,5 @@
 import numpy as np
+import json
 
 class DOPRI54:
     def __init__(self, rtol=1e-6, atol=1e-9, h_init=0.01, h_min=1e-6, h_max=1.0):
@@ -71,16 +72,22 @@ class ESDIRK23:
         self.h_max = h_max
         self.max_iter = max_iter
         self.tol = tol
+        self.info = {'JacDir_ki_diff':[], 'ESDIRK_k': [], 't':[], 'step_evals':0, 'accepted_iter':0, 'rejected_iter':0, 'h_step_width':[], 'rel_err_norm':[], 'iter':[]}
+
+        # ESDIRK23 constant properties
+        self.p = 2      # integrated order
+        self.phat = 3   # embedded order
+        self.s = 3      # stages
 
         # Coefficients for ESDIRK23 (L-stable); common choice gamma = 1 - 1/sqrt(2) = 0.2928932188134524
-        self.c = [0, self.gamma, 1.0]
+        self.c = [0, 2*self.gamma, 1.0]
         self.A = np.array([
-            [self.gamma, 0, 0],
-            [1 - self.gamma, self.gamma, 0],
-            [0.25, 0.25, self.gamma]
+            [0, 0, 0],
+            [self.gamma, self.gamma, 0],
+            [(1-self.gamma)/2, (1-self.gamma)/2, self.gamma]
         ])
-        self.b = np.array([0.25, 0.25, self.gamma])
-        self.b_hat = np.array([0.5, 0.5, 0.0])  # Lower-order for error estimate
+        self.b = np.array([(1-self.gamma)/2, (1-self.gamma)/2, self.gamma])
+        self.b_hat = np.array([(6*self.gamma-1)/(12*self.gamma), 1/(12*self.gamma*(1-2*self.gamma)), (1-3*self.gamma)/(3*(1-2*self.gamma))])  # higher-order embedded for error estimate
         self.e = self.b - self.b_hat
 
     def step(self, f, t, y, jac=None, params=None, h=None):
@@ -88,7 +95,9 @@ class ESDIRK23:
             h = self.h_init
         s = len(self.c)
         k = [np.zeros_like(y) for _ in range(s)]
+        self.info['step_evals'] += 1
 
+        # iter through stages
         for i in range(s):
             ti = t + self.c[i] * h
             yi = y.copy()
@@ -108,11 +117,14 @@ class ESDIRK23:
                 else:
                     ki_new = g  # basic fixed-point update
 
-                if np.linalg.norm(ki_new - ki) < self.tol:
+                ki_diff = np.linalg.norm(ki_new - ki)
+                self.info['JacDir_ki_diff'].append(ki_diff)
+                if  ki_diff < self.tol:
                     break
                 ki = ki_new
-
+            
             k[i] = ki
+            self.info['ESDIRK_k'].append(ki)
 
         y_new = y + h * sum(self.b[i] * k[i] for i in range(s))
         y_hat = y + h * sum(self.b_hat[i] * k[i] for i in range(s))
@@ -126,14 +138,17 @@ class ESDIRK23:
         h = self.h_init
 
         while t < tf:
+            self.info['h_step_width'].append(h)
             h = min(h, tf - t)
 
             try:
                 y_new, err = self.step(f, t, y, jac=jac, params=params, h=h)
             except Exception as e:
-                raise RuntimeError(f"Step failed at t={t} with h={h}: {e}")
+                raise RuntimeError(f"ESDIRK23 integration step failed at t={t} with h={h}: {e}")
 
+            # accept step
             if err <= 1:
+                self.info['accepted_iter'] += 1
                 t += h
                 y = y_new
                 t_vals.append(t)
@@ -148,6 +163,7 @@ class ESDIRK23:
                 h = min(self.h_max, h_new)
             else:
                 # Reject step and shrink
+                self.info['rejected_iter'] += 1
                 h = max(self.h_min, h * max(0.1, 0.9 * (1 / err)**0.25))
 
             # Guard against vanishing h
@@ -156,6 +172,10 @@ class ESDIRK23:
 
             iter_+=1
             if iter_%500==0: print(f"Iteration {iter_}, err: {err}, h: {h}")
+            if iter_%1000==0:
+                with open('./traces/ESDIRK_23_adaptive_v01.json', 'w') as fp:
+                    json.dump(self.info, fp)
+
         return np.array(t_vals), np.array(y_vals)
 
 
