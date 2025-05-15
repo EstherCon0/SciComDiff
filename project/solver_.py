@@ -3,12 +3,18 @@ import json, os
 from datetime import datetime
 
 class DOPRI54:
-    def __init__(self, rtol=1e-6, atol=1e-9, h_init=0.01, h_min=1e-6, h_max=1.0):
+    def __init__(self, rtol=1e-6, atol=1e-9, h_init=0.01, h_min=1e-6, h_max=1.0, eps:float=0.8, norm:str|int='inf'):
         self.rtol = rtol
         self.atol = atol
+        self.eps = eps
         self.h_init = h_init
         self.h_min = h_min
         self.h_max = h_max
+        self.stages = 7
+        self.p = 4
+        self.phat = 5
+        self.norm = norm
+        self.info = {"step_evals":0, "t":[], "err_norm":[rtol, rtol], "h":[h_init, h_init]}
 
         # Butcher tableau for Dormand-Prince 5(4)
         self.c = np.array([0, 1/5, 3/10, 4/5, 8/9, 1.0, 1.0])
@@ -26,10 +32,13 @@ class DOPRI54:
         self.e = np.array([71/57600, 0, -71/16695, 71/1920, 17253/339200, 22/525, -1/40])
 
     def step(self, f, t, y, params=None, h=None):
+        if type(y)==float: 
+            y = [y]
+        self.info['step_evals'] += 1
         if h is None:
             h = self.h_init
         k = []
-        for i in range(7):
+        for i in range(self.stages):
             yi = y.copy()
             for j in range(i):
                 yi += h * self.A[i][j] * k[j]
@@ -37,31 +46,72 @@ class DOPRI54:
 
         y_next = y + h * np.dot(self.b, k)
         y_err = h * np.dot(self.b - self.b_hat, k)
-        err_norm = np.linalg.norm(y_err / (self.atol + self.rtol * np.abs(y_next)), ord=np.inf)
-        return y_next, err_norm, k[-1]
 
-    def integrate(self, f, t0, y0, tf, params=None):
-        t_vals = [t0]
-        y_vals = [y0]
-        t = t0
-        y = y0
+        if self.norm=='inf':
+            err_norm = np.linalg.norm(y_err / (self.atol + self.rtol * np.abs(y_next)), ord=np.inf)
+        elif type(self.norm)==int:
+            err_norm = np.linalg.norm(y_err / (self.atol + self.rtol * np.abs(y_next)), ord=self.norm)
+
+        return y_next, err_norm
+
+    def integrate(self, f, t0, y0, tf, params=None, controller:str='pid'):
+        allowed_controller = ['pid', 'asymptotic', 'predictive', 'aggressive']
+        if controller not in allowed_controller: raise ValueError(f"The controller must be either: {', '.join(allowed_controller)}")
+
+        self.info['t'].append(t0)
+        y_vals, t, y = [y0], t0, y0
         h = self.h_init
 
         while t < tf:
-            if t + h > tf:
-                h = tf - t
-            y_new, err_norm, _ = self.step(f, t, y, params, h)
+            h = min(h, tf - t)
+            self.info['h'].append(h)
 
-            if err_norm <= 1:
+            # integration step safeguard
+            try:
+                y_new, err_norm = self.step(f, t, y, params=params, h=h)
+                self.info['err_norm'].append(err_norm)
+            except Exception as e:
+                raise RuntimeError(f"DOPRI54 integration step failed at t={t} with h={h}: {e}")
+
+            if controller=='aggressive':
+                if err_norm <= 1:
+                    t += h
+                    y = y_new
+                    self.info['t'].append(t)
+                    y_vals.append(y)
+                    h = min(self.h_max, h * min(5, 0.9 * (1 / err_norm)**0.2)) if err_norm > 0 else self.h_max
+                else:
+                    h = max(self.h_min, h * max(0.1, 0.9 * (1 / err_norm)**0.25))
+            
+            elif controller=='pid':
                 t += h
                 y = y_new
-                t_vals.append(t)
+                self.info['t'].append(t)
                 y_vals.append(y)
-                h = min(self.h_max, h * min(5, 0.9 * (1 / err_norm)**0.2))
-            else:
-                h = max(self.h_min, h * max(0.1, 0.9 * (1 / err_norm)**0.25))
+                k_p, k_i = 0.4/self.phat, 0.3/self.phat
+                h *= ((self.eps/err_norm)**k_i)*(err_norm/self.info['err_norm'][-2])**k_p
+            
+            elif controller=='asymptotic':
+                t += h
+                y = y_new
+                self.info['t'].append(t)
+                y_vals.append(y)
+                k_p, k_i = 0.4/self.phat, 0.3/self.phat
+                h *= (self.eps/err_norm)**(1/self.phat)
 
-        return np.array(t_vals), np.array(y_vals)
+            elif controller=='predictive':
+                t += h
+                y = y_new
+                self.info['t'].append(t)
+                y_vals.append(y)
+
+                k2, k1 = 1, 1 # after Gustaffson (1992); Sensitivity Paper Eq.40
+                past_h_ratio = h/self.info['h'][-2]
+                past_r_ratio = self.info['err_norm'][-2]/err_norm
+
+                h *= ((past_h_ratio)*(self.eps/err_norm)**(k2/self.phat)) * (past_r_ratio**(k1/self.phat))
+
+        return np.array(y_vals), self.info
 
 
 class ESDIRK23:
@@ -116,8 +166,6 @@ class ESDIRK23:
                     J = jac(ti, yi + h * self.A[i][i] * ki, *params) if params else jac(ti, yi + h * self.A[i][i] * ki)
                     I = np.eye(len(y))
                     res = ki - g
-                    #print("res:", res, "J", J, "ki", ki, "g", g)
-                    #print('solve matrix:', I - h * self.A[i][i] * J)
                     dki = np.linalg.solve(I - h * self.A[i][i] * J, res)
                     ki_new = ki - dki
                 else:

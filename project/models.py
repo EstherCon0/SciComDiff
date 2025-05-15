@@ -168,6 +168,8 @@ CSTR1_PARAMS = (deltaHr, rho, cp, Ea_over_R, k0, V, F, CA_in, CB_in, T0, Tin)
 CSTR1_param_type = Tuple[float, float, float, float, float, float, float, float, float, float, float]
 
 def CSTR1(t:float, T_state:float, params:CSTR1_param_type=CSTR1_PARAMS) -> float:
+    if type(T_state)==list: 
+        T_state = T_state[0]
     deltaHr, rho, cp, Ea_over_R, k0, V, F, CA_in, CB_in, T0, Tin = params
     beta = -deltaHr / (rho * cp)
 
