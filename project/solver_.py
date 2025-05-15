@@ -65,8 +65,8 @@ class DOPRI54:
 
 
 class ESDIRK23:
-    def __init__(self, gamma:float=(1-(1/2**0.5)), rtol=1e-6, atol=1e-9, h_init=1e-2, h_min=1e-6, h_max=1.0, max_iter=10, tol=1e-8, eps:float=0.8, norm:str|int='inf'):
-        self.gamma = gamma
+    def __init__(self, gamma:float=(2-2**0.5)/2, rtol=1e-6, atol=1e-9, h_init=1e-2, h_min=1e-6, h_max=1.0, max_iter=10, tol=1e-8, eps:float=0.8, norm:str|int='inf'):
+        self.gamma = gamma # commonly (1-(1/2**0.5)) \approx (2-2**0.5)/2
         self.rtol = rtol
         self.atol = atol
         self.h_init = h_init
